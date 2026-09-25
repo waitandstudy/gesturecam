@@ -2022,6 +2022,45 @@ UI 的按钮和"以后支持"那行提示都从它读。
   要么以后拿它做"跳到第 N 张"，要么删掉。
   ⚠️ **这个项目没有 git，删了就真没了**，所以我先留着。**建议尽快 `git init`**。
 
+---
+
+## 30. 上传到 GitHub（以及这条路上的两个坑）
+
+仓库：**`2458283786-blip/gesturecam`（私有）**。
+第一个提交 `4f4a874`：95 个文件、25778 行。
+
+### 30.1 两个坑（下次别再踩）
+
+1. **`git push` 必须走代理。**
+   这台机器 `git config --global http.proxy = http://127.0.0.1:65532`（本地代理）。
+   - 直连 GitHub **能连上**（`ls-remote` 一个公共仓库成功），但**传大文件会被重置**：
+     `error: RPC failed; curl 55 Send failure: Connection was reset` —— 9MB 传到一半断。
+   - **走代理就成功了**（顺手把 `http.postBuffer` 提到 512MB）。
+   - ⚠️ 那个代理**不是一直在跑**：第一次尝试报的是
+     `Failed to connect to github.com port 443 via 127.0.0.1` —— 代理当时没开。
+     **推送失败先看一眼代理在不在**：`Test-NetConnection 127.0.0.1 -Port 65532`。
+2. **凭据库里有一条垃圾条目。**
+   `git credential fill` 按 `host=github.com` 拿到的第一条，用户名写着「你的新Token」，
+   长度 40、**已失效（401）**。显式带上 `username=2458283786-blip` 才拿到能用的那条。
+   **推代码 / 调 API 都显式带用户名**，别让 git 自己挑。
+
+### 30.2 推送用的方式（不落盘、不打印）
+
+不把 token 写进 `.git/config`，也不打印它 —— 每次推送在同一条命令里现取现用：
+
+```
+git -c http.postBuffer=524288000 -c credential.helper= \
+    -c "http.extraheader=AUTHORIZATION: basic <base64(用户名:token)>" push origin main
+```
+
+`credential.helper=` 置空是为了**绕开图形化凭据弹窗**（在非交互环境里它会一直等）。
+
+### 30.3 关于仓库内容
+
+`.gitignore` 早就有（`node_modules` / `dist` / `tools/bin` / `*.exe` 都排除）。
+仓库里唯一的大文件是 `public/models/hand_landmarker.task` **7.46MB** ——
+**离线要用，必须进库**（整个仓库约 9MB，远低于 GitHub 的单文件 100MB 上限）。
+
 ### 23.7 浏览器验收抓到的真 bug：手离开画面时指弹检测器不重置
 
 `updateSlotWithoutHand` 里重置了手型（`slot.shape = 'other'`），但**没有碰 `flickDetector`**。
