@@ -1,0 +1,134 @@
+﻿
+
+GestureCam 外部项目技术参考与借鉴指南
+给 AI 开发助手使用的技术参考文档
+一、项目目标
+GestureCam 的定位不是单纯的“手势控制图片”，而是一款面向抖音/TikTok 等口播视频创作者的“互动口播相机”。用户打开手机摄像头后，可以在录制过程中通过手势直接操控画面中的图片、素材和未来的其他虚拟对象，最终直接录制成视频，减少传统后期制作中的关键帧操作。
+二、重点参考项目
+Handy
+链接：https://github.com/Vin124/handy
+最适合作为 MVP 技术参考：MediaPipe HandLandmarker、One-Euro 平滑、pinch 检测、抓取偏移、双手缩放、多图层场景、归一化坐标、虚拟摄像头等。MIT License，可重点研究其架构和算法思路。
+Barehands
+链接：https://github.com/jaredrhod/barehands
+重点参考交互设计：pinch 拖动、双手缩放、flick 投掷、clap 清空、远距离 claw 拉取，以及物体行为化设计。项目为 AGPL-3.0-or-later，闭源商业项目不要直接复制其代码，应主要借鉴交互和架构思想。
+Portal-ble
+链接：https://github.com/brownhci/Portalble
+参考手机端 AR + MediaPipe + Unity 的实现路线，说明手机无外部硬件也可以进行裸手虚拟对象操作。
+On-device-XR-Workspace
+链接：https://github.com/minho511/On-device-XR-Virtual-Desktop
+参考 Android + Unity + AR Foundation + MediaPipe/ONNX 的移动端路线，以及手势控制虚拟对象尺寸、方向和外观的方式。
+J.E.S.T.E.R.
+链接：https://github.com/heeelol/jester
+参考 MediaPipe + Three.js 的多媒体/虚拟对象交互，以及 pinch、双手缩放/旋转、图片/视频/3D 对象等扩展方向。
+GestureCAD / 3D Object Manipulation
+链接：https://github.com/kattapuneeth14-ui/GestureCAD
+https://github.com/sspasojevic/3D-Object-Manipulation-with-Hand-Gesture-Recognition
+主要作为手势选择、对象命中、平移、旋转、缩放和碰撞等技术资料。更适合后期扩展。
+三、可以借鉴的核心能力
+手势检测：MediaPipe HandLandmarker；使用手部关键点判断 pinch、双指距离、手掌位置等。
+Pinch 抓取：Pinch 出现时，如果手指位置位于图片对象范围内，则触发抓取；松开后释放。
+抓取偏移：记录抓取点与图片中心的偏移，避免图片被突然吸到手指中心。
+手势迟滞：进入 pinch 和退出 pinch 使用不同阈值，降低临界状态抖动。
+关键点平滑：可采用 One-Euro Filter 等方式减少手部关键点抖动，同时保持较低延迟。
+双手缩放：双手之间距离变化映射到图片 scale，并设置最小/最大缩放范围。
+多对象场景：从 Scene + Object 结构开始设计，不要把系统写死成只能存在一张图片。
+投掷/惯性：后期能力：松手瞬间记录速度，使对象继续运动并逐渐减速。
+物理行为：后期增加重力、碰撞、弹簧、绳子等行为。
+录制输出：将摄像头画面、虚拟对象和必要 UI/特效合成后直接录制为竖屏视频。
+四、推荐架构
+核心原则：手势不要直接修改图片属性，而应该采用“手势 → 交互事件 → 行为 → 对象”的解耦方式。
+CameraManager
+    ↓
+HandTrackingManager
+    ↓
+GestureManager
+    ↓
+InteractionManager
+    ↓
+SceneManager
+    ↓
+ObjectManager
+    ↓
+BehaviorManager
+    ↓
+PhysicsManager
+    ↓
+Renderer / Compositor
+    ↓
+Recorder
+五、推荐的对象结构
+Scene
+ ├── Object 1
+ ├── Object 2
+ └── Object 3
+
+Object
+ ├── Transform
+ │   ├── Position
+ │   ├── Scale
+ │   └── Rotation
+ ├── Appearance
+ │   ├── Texture
+ │   ├── Opacity
+ │   └── ZIndex
+ ├── Behavior
+ │   ├── FollowHand
+ │   ├── Fixed
+ │   ├── Hanging
+ │   └── Future Behaviors
+ ├── Interaction
+ │   ├── Grab
+ │   ├── Scale
+ │   ├── Rotate
+ │   └── Future Interactions
+ └── Physics
+     ├── Velocity
+     ├── Gravity
+     ├── Collision
+     └── Friction
+六、推荐开发阶段
+阶段 1：摄像头 + Scene + Object + 坐标系统
+阶段 2：手部追踪 + Pinch + 手部位置
+阶段 3：ImageObject 图片对象
+阶段 4：FollowHand，让图片跟随手移动
+阶段 5：Pinch Scale，实现双手缩放
+阶段 6：Multi Object，多图片同时存在
+阶段 7：Fixed / Top Hanging，实现顶部悬挂图片
+阶段 8：Boundary Mode，实现不同边界策略
+阶段 9：Recording，录制最终合成画面
+阶段 10：Physics，增加惯性、投掷、重力、碰撞、弹簧等效果
+七、顶部悬挂模式
+顶部悬挂可以逐渐发展为 GestureCam 的特色交互语言。第一版只需要实现固定悬挂；后续再加入绳子、弹簧、重力等效果。
+┌──────────────────────┐
+│   │         │        │
+│   │         │        │
+│  🖼️        🖼️        │
+│                      │
+│          👤          │
+│                      │
+└──────────────────────┘
+八、画面边界不要写死
+建议设计可配置的 BoundaryMode：
+FULL_VISIBLE：尽量保证整个图片都在画面内
+CENTER_CLAMP：限制图片中心，允许部分内容越界
+ALLOW_OVERFLOW：允许图片明显超出画面边界
+NO_BOUNDARY：完全不限制对象位置
+不要在底层代码中写死某一种边界逻辑，应让场景或对象选择自己的边界策略。
+九、MVP 阶段不要过度复杂化
+不要一开始训练自己的手势识别 AI 模型，优先使用 MediaPipe 关键点 + 规则判断。
+不要一开始加入完整 3D 引擎式物理系统。
+不要一开始实现所有手势。
+不要让 GestureManager 直接操作 ImageObject 的位置、缩放等属性。
+不要为了功能丰富加入大量用户暂时用不到的设置。
+优先把“摄像头 + 一张图片 + pinch 抓取 + 移动 + 双手缩放 + 录制”做到稳定流畅。
+十、给 AI 开发助手的使用要求
+这些 GitHub 项目应该被当作“技术教材”和“设计参考”，而不是要求 AI 直接复制代码。
+研究外部项目的架构、算法、交互方式和工程组织。
+优先参考 Handy 的手势、抓取、缩放实现思路。
+参考 Barehands 的物理交互和对象行为设计，但注意 AGPL-3.0-or-later 许可证。
+参考 Portal-ble 和 On-device-XR-Workspace 的移动端实现路线。
+借鉴成熟思路后，在 GestureCam 自己的架构中重新实现。
+如果准备复用任何第三方代码，必须先检查该仓库当前许可证和具体文件的许可要求。
+十一、最终产品方向
+GestureCam 最终应该形成一种“身体即剪辑工具”的体验：创作者说话时，用手把图片拉进来、移动、放大、缩小、悬挂、甩出去，这些操作本身就是视频中的视觉表达，而不是录完以后再逐帧制作。
+第一阶段的目标不是功能最多，而是验证核心闭环：打开摄像头 → 选择素材 → 手势抓取 → 移动/缩放 → 多对象 → 直接录制。

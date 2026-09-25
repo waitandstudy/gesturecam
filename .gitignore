@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.vite/
+*.local
+.DS_Store
+*.log
+
+# Vite 会监视项目目录，大二进制放在里面会让 dev server 崩掉（EBUSY）。
+# 隧道程序统一放在 %LOCALAPPDATA%\GestureCam\tools\ 下，不放进仓库。
+tools/bin/
+*.exe

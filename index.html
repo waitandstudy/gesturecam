@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      手机端关键设置：
+      - viewport-fit=cover                    刘海屏/灵动岛安全区，配合 CSS env(safe-area-inset-*)
+      - maximum-scale=1 / user-scalable=no    禁止双指缩放页面（缩放手势要留给素材操作用）
+      - mobile-web-app-capable / apple-*      加到主屏/装成 App 后没有浏览器地址栏，才像相机
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
+    />
+    <!-- 与 styles.css 的 --bg 保持一致（品牌底色 #1A1A1D） -->
+    <meta name="theme-color" content="#1A1A1D" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="description" content="GestureCam —— 通过手势在拍摄过程中直接操控虚拟素材的口播相机" />
+    <title>GestureCam · 手势控制口播素材相机</title>
+  </head>
+  <body>
+    <div class="app">
+      <!-- 摄像头原始流只作为 canvas 的采样源，不直接展示（展示由渲染器负责，将来要叠加素材） -->
+      <video id="camera-source" class="camera-source" playsinline muted autoplay disablepictureinpicture></video>
+      <canvas id="stage" class="stage"></canvas>
+
+      <!-- 成片画幅只显示不可点：它是"要随时知道"的状态，但切换不常用（切换按钮在设置里） -->
+      <span id="aspect-chip" class="aspect-chip">9:16</span>
+
+      <p id="status" class="status" role="status" aria-live="polite">正在请求摄像头权限…</p>
+      <p id="error" class="error" role="alert" hidden></p>
+
+      <!--
+        调试开关：默认**关**（见 main.ts 的 showDebug）。
+        以前默认开着，日常拍摄时左上角一大块读数压着画面 —— 那是标定用的，不是给人看的。
+      -->
+      <button id="toggle-debug" type="button" class="floating-button" aria-pressed="false" title="显示/隐藏调试信息">
+        调试
+      </button>
+
+      <!--
+        底部只留三个：加素材 / 拍摄 / 设置。
+        手机窄屏上按钮越多每个越小，而"加图"和"拍摄"是每次都要点的。
+      -->
+      <nav class="toolbar" aria-label="工具栏">
+        <input
+          id="file-input"
+          class="visually-hidden"
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          multiple
+        />
+        <button id="add-image" type="button" class="icon-button" title="添加素材">＋</button>
+        <button id="record" type="button" class="record-button" title="开始/停止录制">● 拍摄</button>
+        <button id="open-settings" type="button" class="icon-button" title="设置">⚙</button>
+      </nav>
+
+      <!--
+        素材抽屉（"拉窗帘"）：在画面上方约 1/5 处**捏合**、往下拖，就把素材拉下来。
+        每一格是个**开关** —— 捏一下显示、再捏一下收起，可以同时显示多张。
+        ⚠️ 起手用捏合而不是握拳：握拳在这个项目里是**急停**，"抓紧往下拉"会先把急停触发掉。
+        它是个 DOM 浮层，**不进成片**（成片只画那块离屏画布）。
+      -->
+      <div id="drawer" class="drawer" hidden>
+        <div class="drawer-handle"><span class="drawer-grip"></span></div>
+        <p class="drawer-title">素材抽屉 · 捏一下图片 = 显示，再捏一下 = 收起</p>
+        <ul id="drawer-list" class="drawer-list"></ul>
+        <p id="drawer-empty" class="sheet-hint">抽屉是空的 —— 先点底栏「＋」加几张。</p>
+        <button id="drawer-close" type="button" class="button">收起抽屉</button>
+      </div>
+
+      <!--
+        素材箱（拍摄前的第一步）—— §25 定的"工具箱式"流程：
+        先挑好这次要用的东西、**排好顺序**，再进相机；拍摄中打响指就按这个顺序一张张放出来。
+        它同时是**打开 App 的第一屏** —— 挑好之前不该先看到相机。
+      -->
+      <div id="material-sheet" class="prep" hidden>
+        <div class="prep-card" role="dialog" aria-label="素材箱" aria-modal="true">
+          <p class="prep-title">素材箱 · <span id="material-count">0</span> 件</p>
+          <p class="prep-hint">排好顺序 —— 拍摄时「打响指」就按这个顺序一张张出现。</p>
+          <ul id="material-list" class="material-list"></ul>
+          <p id="material-empty" class="sheet-hint">
+            还没有素材。点下面「添加图片」选几张 —— 拍摄时捏合能拖动、两只手缩放、甩开删掉。
+          </p>
+          <div class="sheet-grid">
+            <button id="material-add-image" type="button" class="button button--primary">＋ 添加图片</button>
+            <button id="material-clear" type="button" class="button">全部清空</button>
+          </div>
+          <p id="material-planned" class="sheet-hint"></p>
+          <button id="material-close" type="button" class="button button--primary prep-start">开始拍摄 ▶</button>
+        </div>
+      </div>
+
+      <!-- 设置面板：放"要能改、但不是每次都用"的东西 -->
+      <div id="settings-sheet" class="sheet" hidden>
+        <div class="sheet-card" role="dialog" aria-label="设置" aria-modal="true">
+          <p class="sheet-title">设置</p>
+          <div class="sheet-grid">
+            <button id="cycle-aspect" type="button" class="button" title="切换成片画幅">成片 9:16</button>
+            <button id="switch-camera" type="button" class="button" title="前摄 / 后摄">切换镜头</button>
+            <button id="toggle-mirror" type="button" class="button" aria-pressed="false" title="镜像自拍画面">
+              镜像
+            </button>
+            <button id="clear-scene" type="button" class="button" title="清空画面上的全部素材">清空素材</button>
+          </div>
+          <p class="sheet-hint">
+            手势速查：拇指与食指捏合＝抓住素材 · 两只手都捏住再开合＝缩放 · 拇指扣住食指再甩开＝删掉手里那张
+          </p>
+          <button id="close-settings" type="button" class="button button--primary">完成</button>
+        </div>
+      </div>
+
+      <!-- 录制结果：预览 + 保存。手机上必须能直接看能直接存，否则"拍完就能用"是空话 -->
+      <div id="result-panel" class="result-panel" hidden>
+        <div class="result-card">
+          <p id="result-title" class="result-title">录制完成</p>
+          <video id="result-video" class="result-video" playsinline controls preload="metadata"></video>
+          <p id="result-meta" class="result-meta"></p>
+          <div class="result-actions">
+            <button id="result-save" type="button" class="button button--primary">保存到相册</button>
+            <a id="result-download" class="button" download="gesturecam.mp4">下载</a>
+            <button id="result-close" type="button" class="button">关闭</button>
+          </div>
+          <p id="result-hint" class="result-hint"></p>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

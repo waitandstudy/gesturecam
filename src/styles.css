@@ -1,0 +1,772 @@
+/*
+ * GestureCam 主题与布局
+ *
+ * ============================ 颜色约定 ============================
+ * **这里是颜色的唯一出处。** JS / canvas 侧要用颜色，走 `src/ui/theme.ts` 的
+ * `palette()` 读这些变量，不要手抄十六进制 —— 抄一份就会漂一份，
+ * 而"canvas 上的颜色和 DOM 上的对不上"是最难查的一类问题。
+ *
+ *   主色（品牌）  --brand   #1DDFFF  高亮 / 选中 / 准星 / 主按钮
+ *   底色（品牌）  --bg      #1A1A1D  页面与画布底（letterbox 也是它）
+ *   以下为派生副色：
+ *   前景          --fg      #F2F4F8
+ *   次要文字      --muted   #8B94A6
+ *   危险 / 录制中  --danger  #FF3B5C
+ *   接近上限      --warn    #FFB020
+ *   成功 / 已保存  --success #3DDC97
+ *   浮层底        --panel   rgba(26,26,29,.86)
+ *   高一层表面     --surface #232329   设置面板 / 结果卡片
+ *   描边          --border  rgba(255,255,255,.12)
+ *
+ * 视觉方向（用户选）：**接近手机自带相机** —— 全黑、极简、按钮用图标，
+ * 画面之外的东西尽量少、尽量小。
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ── 品牌色：用户指定 ── */
+  --brand: #1ddfff;
+  --bg: #1a1a1d;
+
+  /* ── 派生副色 ── */
+  --fg: #f2f4f8;
+  --muted: #8b94a6;
+  --accent: var(--brand);
+  --accent-soft: rgba(29, 223, 255, 0.16);
+  --danger: #ff3b5c;
+  --danger-soft: rgba(255, 59, 92, 0.22);
+  --warn: #ffb020;
+  --success: #3ddc97;
+  --panel: rgba(26, 26, 29, 0.86);
+  --surface: #232329;
+  --border: rgba(255, 255, 255, 0.12);
+
+  /* 尺寸（改一处全生效，别在下面各写各的） */
+  --radius-pill: 999px;
+  --radius-card: 18px;
+  --tap: 44px; /* iOS HIG / Android 的最小可点区域 */
+  --gap: 10px;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+* {
+  box-sizing: border-box;
+  /* 手机上长按会弹"拷贝/搜索"菜单，相机类界面必须关掉 */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  /* 100dvh 而不是 100vh：移动端浏览器地址栏收起/展开时 vh 不变，会露出底部空白 */
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  /* 关掉下拉刷新与橡皮筋滚动 —— 拍摄界面被"拉一下刷新"打断是致命的 */
+  overscroll-behavior: none;
+  /* 页面本身不参与手势：所有触摸都留给素材抓取 */
+  touch-action: none;
+}
+
+.app {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+/* 摄像头原始流：保持在布局中（display:none 在部分浏览器会停止解码），但完全不可见 */
+.camera-source {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 1;
+  touch-action: none;
+}
+
+/* ------------------------------ 状态与错误 ------------------------------ */
+
+.status {
+  position: absolute;
+  left: calc(12px + var(--safe-left));
+  right: calc(12px + var(--safe-right));
+  bottom: calc(96px + var(--safe-bottom));
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* 错误条：整块浮在顶部，带主色描边，确保"出事了"一眼能看见 */
+.error {
+  position: absolute;
+  left: calc(12px + var(--safe-left));
+  right: calc(12px + var(--safe-right));
+  top: calc(56px + var(--safe-top));
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  color: #ffdde3;
+  font-size: 13px;
+  line-height: 1.5;
+  z-index: 3;
+}
+
+/* ------------------------------ 顶部画幅标 ------------------------------ */
+
+/*
+ * 成片画幅是个"要随时知道"的状态（口播成片是竖是横会影响构图），
+ * 但切换动作不常用 —— 所以做成**只显示、不可点**的小标，按钮收进设置里。
+ */
+.aspect-chip {
+  position: absolute;
+  left: 50%;
+  top: calc(10px + var(--safe-top));
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* ------------------------------ 底部工具栏 ------------------------------ */
+
+/*
+ * 只放**拍摄时最常用**的三个：加素材 / 拍摄 / 设置。
+ * 手机窄屏上按钮越多每个越小，而"拍摄"和"加图"是每次都要点的，
+ * 其余（画幅/翻转/镜像/清空）收进设置面板 —— 见 .sheet。
+ */
+.toolbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: calc(var(--gap) * 2);
+  align-items: center;
+  justify-content: center;
+  padding: 12px calc(16px + var(--safe-right)) calc(14px + var(--safe-bottom)) calc(16px + var(--safe-left));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0));
+  z-index: 4;
+}
+
+/* 通用胶囊按钮（设置面板、结果面板里也用） */
+.button {
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.button--primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 圆形图标按钮（＋ / ⚙）：像原生相机的次要操作 */
+.icon-button {
+  flex: 0 0 auto;
+  width: var(--tap);
+  height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 20px;
+  line-height: 1;
+  font-family: inherit;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.icon-button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.icon-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 拍摄键：整条栏里最大、最显眼的一个（原生相机的做法） */
+.record-button {
+  flex: 0 0 auto;
+  min-width: 132px;
+  min-height: 54px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  padding: 0 20px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.record-button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.record-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 录制中：红色实心，让用户随时知道"还在录" */
+.record-button[data-recording='true'] {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: #ffe3e9;
+}
+
+/* 接近上限：先黄后红。上限是硬护栏（到点自动停），
+   但用户必须有机会主动收尾，所以提前 20% 就开始变色提醒。 */
+.record-button[data-recording='true'][data-usage='warning'] {
+  border-color: var(--warn);
+  background: rgba(255, 176, 32, 0.24);
+  color: #fff2d6;
+}
+
+.record-button[data-recording='true'][data-usage='critical'] {
+  border-color: #fff;
+  background: var(--danger);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* 右上角浮动的"调试"开关：默认**关**，要用再点（见 main.ts 的 showDebug） */
+.floating-button {
+  position: absolute;
+  top: calc(10px + var(--safe-top));
+  right: calc(10px + var(--safe-right));
+  min-width: 52px;
+  min-height: 34px;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  z-index: 5;
+}
+
+.floating-button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------ 设置面板 ------------------------------ */
+
+/*
+ * 底部抽屉。放那些"要能改、但不是每次都用"的东西：
+ * 成片画幅、前后摄、镜像、清空。
+ *
+ * ⚠️ `[hidden]` 必须显式写成 `display: none`：HTML 的 hidden 只靠浏览器默认样式表生效，
+ * 而 `.sheet { display: flex }` 是作者样式、优先级更高会把它盖掉 ——
+ * 结果是面板从一打开就铺着、把整个界面挡住（结果面板踩过同一个坑，见下面）。
+ */
+.sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+
+.sheet[hidden] {
+  display: none;
+}
+
+.sheet-card {
+  width: 100%;
+  max-width: 520px;
+  padding: 16px calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sheet-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+
+/* 两列网格：每格都是 44px 以上的可点区域，不挤成一条 */
+.sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sheet-grid .button {
+  width: 100%;
+  min-height: 48px;
+}
+
+.sheet-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* ------------------------------ 素材抽屉（拉窗帘） ------------------------------ */
+
+/*
+ * 从顶边拉下来的抽屉。**露出多少由 `--drawer-pull` 决定**（0 = 全收起，1 = 全拉下），
+ * 这个值每帧由手势判定给出来（见 `core/gesture/drawerPull.ts`），所以它是"跟手"的，
+ * 不是"点一下弹出来"。
+ */
+.drawer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--safe-top);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px calc(12px + var(--safe-right)) 12px calc(12px + var(--safe-left));
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  z-index: 15;
+  max-height: 56vh;
+  overflow: hidden;
+  transform: translateY(calc((var(--drawer-pull, 0) - 1) * 100%));
+  transition: transform 0.12s ease-out;
+}
+
+.drawer[hidden] {
+  display: none;
+}
+
+.drawer-handle {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 4px;
+}
+
+.drawer-grip {
+  width: 44px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+  opacity: 0.6;
+}
+
+.drawer-title {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/*
+ * 抽屉里**直接铺图片**（不是一行一行的列表）。
+ *
+ * 为什么不用列表：抽屉是给人**用手指去点**的，而捏合中点是拇食指的中点、天然会偏 ——
+ * 细长的行很难指中。图片用长方形平铺，目标又大又一眼认得出是哪张。
+ * `aspect-ratio` 取 4:3 接近多数素材的形状，不裁剪得太狠。
+ */
+.drawer-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+  max-height: 42vh;
+  overflow-y: auto;
+}
+
+.drawer-tile {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 没显示出来的压暗：一眼分得清"画面上现在有哪几张" */
+  opacity: 0.5;
+  transition: opacity 0.12s ease, border-color 0.12s ease;
+}
+
+.drawer-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 没有位图的种类（将来的文字等）显示短标，不留空白格 */
+.drawer-tile-badge {
+  font-size: 18px;
+  color: var(--muted);
+}
+
+.drawer-tile[data-revealed='true'] {
+  opacity: 1;
+  border-color: var(--accent);
+}
+
+.drawer-tile-state {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.62);
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* ------------------------------ 素材箱（拍摄前的入口） ------------------------------ */
+
+/*
+ * **全屏**，不是底部抽屉 —— 它是"打开 App 的第一屏"，挑好之前不该先进相机。
+ * 用不透明的底色而不是半透明：底下的相机预览此时没有意义，透出来只会分心。
+ */
+.prep {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom))
+    calc(16px + var(--safe-left));
+  background: var(--bg);
+  z-index: 25;
+}
+
+.prep[hidden] {
+  display: none;
+}
+
+.prep-card {
+  width: 100%;
+  max-width: 520px;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.prep-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.prep-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* 开始拍摄：整屏里最大的那个按钮，一眼知道下一步该点哪 */
+.prep-start {
+  min-height: 52px;
+  font-size: 15px;
+}
+
+/* 素材箱里的一行：序号 + 缩略图 + 名字 + 三个操作 */
+.material-order {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: center;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.material-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+
+.material-action {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* ------------------------------ 素材箱列表 ------------------------------ */
+
+.material-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* 条目多了自己滚，不要把整张卡片撑出屏幕 */
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.material-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+}
+
+/* 缩略图：解码前 / 没有预览的（将来的文字）显示短标，不留空白框 */
+.material-thumb {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--muted);
+  overflow: hidden;
+}
+
+.material-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.material-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.material-label {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.3;
+  /* 文件名可能很长：截断而不是把"删除"挤出屏幕 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-kind {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.material-remove {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+/* ------------------------------ 录制结果 ------------------------------ */
+
+.result-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom))
+    calc(16px + var(--safe-left));
+  background: rgba(0, 0, 0, 0.72);
+  z-index: 30;
+}
+
+/*
+ * 必须显式处理 [hidden]。
+ * HTML 的 hidden 属性只靠浏览器默认样式表里的 `display: none` 生效，
+ * 而上面那条 `.result-panel { display: flex }` 是作者样式，优先级更高、会把它盖掉 ——
+ * 结果是面板从页面一打开就全屏铺着，把整个界面挡住，而且"关闭"按钮看起来失效
+ * （它确实把 hidden 设回去了，但视觉上没有任何变化）。
+ * 这类 bug 的教训不只是这一行 CSS，而是：验证 UI 可见性一定要读**计算样式**，
+ * 不能读 hidden 属性。
+ */
+.result-panel[hidden] {
+  display: none;
+}
+
+.result-card {
+  width: 100%;
+  max-width: 360px;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 16px;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.result-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.result-video {
+  width: 100%;
+  max-height: 46vh;
+  border-radius: 12px;
+  background: #000;
+}
+
+.result-meta {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.result-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.result-actions .button {
+  flex: 1 1 0;
+  text-decoration: none;
+  padding: 10px 6px;
+  font-size: 13px;
+}
+
+.result-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--success);
+}
+
+/* 横屏时给一句提示：口播成片是竖屏，横着拿手机画面会被裁得很窄 */
+@media (orientation: landscape) and (max-height: 500px) {
+  .app::after {
+    content: '建议竖屏使用：口播成片是竖屏比例';
+    position: absolute;
+    left: 50%;
+    top: calc(46px + var(--safe-top));
+    transform: translateX(-50%);
+    padding: 6px 12px;
+    border-radius: var(--radius-pill);
+    background: var(--panel);
+    border: 1px solid var(--warn);
+    color: #ffd479;
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 6;
+  }
+}
